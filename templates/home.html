@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}Home — Maskani{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 text-center py-5">
+        <h1 class="fw-bold mb-3">Welcome, {{ user.email }}</h1>
+        <p class="text-muted">You are signed in to Maskani.</p>
+    </div>
+</div>
+{% endblock %}
