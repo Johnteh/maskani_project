@@ -45,10 +45,11 @@ INSTALLED_APPS = [
     'django_extensions',
 
     # local apps
-    'accounts',
+    'common',
+    'identity',
 ]
 
-AUTH_USER_MODEL = 'accounts.User'
+AUTH_USER_MODEL = 'identity.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
