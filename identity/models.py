@@ -1,4 +1,5 @@
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.core.validators import RegexValidator
 from django.db import models
 
 from common.models import BaseModel
@@ -20,14 +21,29 @@ class UserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
 
 
+phone_validator = RegexValidator(
+    regex=r'^\+[1-9]\d{7,14}$',
+    message='Enter the phone number in international format, e.g. +254712345678.',
+)
+
+
 class User(AbstractUser, BaseModel):
     username = None
     email = models.EmailField(unique=True)
+    phone = models.CharField(
+        max_length=16, unique=True, null=True, blank=True, validators=[phone_validator],
+    )
+    phone_verified = models.BooleanField(default=False)
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
 
     objects = UserManager()
+
+    def save(self, *args, **kwargs):
+        # store "no phone" as NULL, never '', so the unique constraint allows many users without one
+        self.phone = self.phone or None
+        super().save(*args, **kwargs)
 
 
 class Organisation(BaseModel):
