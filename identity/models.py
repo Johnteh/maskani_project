@@ -78,3 +78,18 @@ class Role(BaseModel):
 
     def __str__(self):
         return self.name
+
+
+class Membership(BaseModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='memberships')
+    organisation = models.ForeignKey(Organisation, on_delete=models.CASCADE, related_name='memberships')
+    roles = models.ManyToManyField(Role, blank=True, related_name='memberships')
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'organisation'], name='one_membership_per_organisation'),
+        ]
+
+    def __str__(self):
+        return f'{self.user} @ {self.organisation}'
