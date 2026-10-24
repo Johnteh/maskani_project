@@ -170,3 +170,18 @@ class AuthApiTests(TestCase):
         self.client.credentials()
         refreshed = self.client.post('/api/auth/token/refresh/', {'refresh': tokens['refresh']}, format='json')
         self.assertEqual(refreshed.status_code, 200)
+
+
+class AdminTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser('0712345678', password='pass12345')
+
+    def test_superuser_has_permissions(self):
+        self.assertTrue(self.admin.has_perm('identity.view_user'))
+        self.assertTrue(self.admin.has_module_perms('identity'))
+        self.assertFalse(User.objects.create_user('0722345678', password='pass12345').has_perm('identity.view_user'))
+
+    def test_names(self):
+        self.admin.first_name, self.admin.last_name = 'Amina', 'Odhiambo'
+        self.assertEqual(self.admin.get_full_name(), 'Amina Odhiambo')
+        self.assertEqual(self.admin.get_short_name(), 'Amina')
