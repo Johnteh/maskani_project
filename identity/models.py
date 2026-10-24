@@ -3,22 +3,34 @@ from django.core.validators import RegexValidator
 from django.db import models
 
 from common.models import BaseModel
+from common.phone import normalize_phone
 
 
 class UserManager(BaseUserManager):
-    def create_user(self, email, password=None, **extra_fields):
-        if not email:
-            raise ValueError('Email is required')
-        email = self.normalize_email(email)
-        user = self.model(email=email, **extra_fields)
+    def get_by_natural_key(self, phone):
+        """Find a user by phone number. authenticate() calls this, so the admin and the API login share it."""
+        phone = normalize_phone(phone)
+        if not phone:
+            raise self.model.DoesNotExist
+        return self.get(phone=phone)
+
+    def create_user(self, phone, password=None, email=None, **extra_fields):
+        phone = normalize_phone(phone)
+        if not phone:
+            raise ValueError('A phone number is required')
+        user = self.model(
+            phone=phone,
+            email=self.normalize_email(email) if email else None,
+            **extra_fields,
+        )
         user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email, password=None, **extra_fields):
+    def create_superuser(self, phone, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
-        return self.create_user(email, password, **extra_fields)
+        return self.create_user(phone, password, **extra_fields)
 
 
 phone_validator = RegexValidator(
@@ -29,21 +41,42 @@ phone_validator = RegexValidator(
 
 class User(AbstractUser, BaseModel):
     username = None
-    email = models.EmailField(unique=True)
-    phone = models.CharField(
-        max_length=16, unique=True, null=True, blank=True, validators=[phone_validator],
-    )
+    phone = models.CharField(max_length=16, unique=True, validators=[phone_validator])
     phone_verified = models.BooleanField(default=False)
+    email = models.EmailField(unique=True, null=True, blank=True)
 
-    USERNAME_FIELD = 'email'
+    USERNAME_FIELD = 'phone'
     REQUIRED_FIELDS = []
 
     objects = UserManager()
 
+    def __str__(self):
+        return self.phone
+
+    def clean(self):
+        super().clean()
+        # AbstractUser.clean() turns a missing email into ''; keep it as NULL
+        self.email = self.email or None
+
     def save(self, *args, **kwargs):
-        # store "no phone" as NULL, never '', so the unique constraint allows many users without one
-        self.phone = self.phone or None
+        # "no email" is stored as NULL, never '', so the unique constraint allows many users without one
+        self.email = self.email or None
+        self.phone = normalize_phone(self.phone)
+        is_new = self.pk is None
         super().save(*args, **kwargs)
+        if is_new:
+            Profile.objects.create(user=self)
+
+
+class Profile(BaseModel):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    id_number = models.CharField(max_length=30, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
+    address = models.TextField(blank=True)
+    sms_opt_in = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f'Profile of {self.user}'
 
 
 class Organisation(BaseModel):
