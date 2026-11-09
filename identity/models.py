@@ -136,3 +136,16 @@ class Membership(BaseModel):
 
     def __str__(self):
         return f'{self.user} @ {self.organisation}'
+
+    @property
+    def permission_codes(self):
+        """Codes granted by all of this membership's roles. One query, then kept on the instance."""
+        if not self.is_active:
+            return frozenset()
+        if not hasattr(self, '_permission_codes'):
+            codes = Permission.objects.filter(roles__memberships=self).values_list('code', flat=True)
+            self._permission_codes = frozenset(codes)
+        return self._permission_codes
+
+    def has_permission(self, code):
+        return code in self.permission_codes
