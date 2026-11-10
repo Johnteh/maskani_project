@@ -3,7 +3,8 @@ from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import RegisterSerializer, UserSerializer
+from .models import Membership
+from .serializers import MyMembershipSerializer, RegisterSerializer, UserSerializer
 
 User = get_user_model()
 
@@ -31,3 +32,19 @@ class MeView(generics.RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+class MyMembershipsView(generics.ListAPIView):
+    """The organisations the user can act in, so the app can choose what to send as X-Organisation."""
+
+    permission_classes = (permissions.IsAuthenticated,)
+    serializer_class = MyMembershipSerializer
+
+    def get_queryset(self):
+        return (
+            Membership.objects
+            .filter(user=self.request.user, is_active=True)
+            .select_related('organisation')
+            .prefetch_related('roles')
+            .order_by('organisation__name')
+        )
