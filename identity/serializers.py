@@ -4,7 +4,7 @@ from rest_framework.validators import UniqueValidator
 
 from common.phone import normalize_phone
 
-from .models import phone_validator
+from .models import Membership, Organisation, phone_validator
 
 User = get_user_model()
 
@@ -39,3 +39,18 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ('id', 'phone', 'phone_verified', 'email', 'first_name', 'last_name')
         read_only_fields = ('phone_verified',)
+
+
+class OrganisationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Organisation
+        fields = ('ref_id', 'name')
+
+
+class MyMembershipSerializer(serializers.ModelSerializer):
+    organisation = OrganisationSerializer(read_only=True)
+    roles = serializers.SlugRelatedField(many=True, read_only=True, slug_field='name')
+
+    class Meta:
+        model = Membership
+        fields = ('ref_id', 'organisation', 'roles')

@@ -357,3 +357,53 @@ class OrgViewSetTests(TestCase):
         response = self.call(LIST, 'post', self.user, self.kilimani, data={'user': self.other.pk})
         self.assertEqual(response.status_code, 403)
         self.assertFalse(Membership.objects.filter(user=self.other).exists())
+
+
+class MyMembershipsApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user('0712345678', password='pass12345')
+        self.other = User.objects.create_user('0722345678', password='pass12345')
+        self.kilimani = Organisation.objects.create(name='Kilimani Court')
+        self.karen = Organisation.objects.create(name='Karen House')
+
+    def get(self, user=None):
+        if user is not None:
+            self.client.force_authenticate(user)
+        return self.client.get('/api/auth/me/memberships/')
+
+    def test_requires_login(self):
+        self.assertEqual(self.get().status_code, 401)
+
+    def test_lists_own_memberships_with_organisation_and_roles(self):
+        membership = Membership.objects.create(user=self.user, organisation=self.kilimani)
+        membership.roles.add(Role.objects.create(name='property-admin'), Role.objects.create(name='caretaker'))
+        response = self.get(self.user)
+        self.assertEqual(response.status_code, 200)
+        [row] = response.json()
+        self.assertEqual(row['ref_id'], str(membership.ref_id))
+        self.assertEqual(row['organisation'], {'ref_id': str(self.kilimani.ref_id), 'name': 'Kilimani Court'})
+        self.assertEqual(sorted(row['roles']), ['caretaker', 'property-admin'])
+
+    def test_ordered_by_organisation_name(self):
+        Membership.objects.create(user=self.user, organisation=self.kilimani)
+        Membership.objects.create(user=self.user, organisation=self.karen)
+        names = [row['organisation']['name'] for row in self.get(self.user).json()]
+        self.assertEqual(names, ['Karen House', 'Kilimani Court'])
+
+    def test_only_active_memberships(self):
+        Membership.objects.create(user=self.user, organisation=self.kilimani)
+        Membership.objects.create(user=self.user, organisation=self.karen, is_active=False)
+        names = [row['organisation']['name'] for row in self.get(self.user).json()]
+        self.assertEqual(names, ['Kilimani Court'])
+
+    def test_never_shows_another_users_memberships(self):
+        Membership.objects.create(user=self.other, organisation=self.karen)
+        self.assertEqual(self.get(self.user).json(), [])
+
+    def test_no_membership_gives_an_empty_list(self):
+        self.assertEqual(self.get(self.user).json(), [])
+
+    def test_needs_no_organisation_header(self):
+        Membership.objects.create(user=self.user, organisation=self.kilimani)
+        self.assertEqual(self.get(self.user).status_code, 200)
