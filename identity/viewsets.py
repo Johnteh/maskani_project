@@ -1,9 +1,9 @@
-from rest_framework import viewsets
+from common.viewsets import BaseModelViewSet
 
 from .permissions import HasPermissions, get_membership
 
 
-class OrgModelViewSet(viewsets.ModelViewSet):
+class OrgModelViewSet(BaseModelViewSet):
     """
     A ModelViewSet whose data belongs to one organisation, chosen by the X-Organisation header.
     Subclasses set `queryset`, `serializer_class` and `required_permissions`, e.g.

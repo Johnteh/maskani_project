@@ -7,6 +7,7 @@ from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 from common.phone import normalize_phone
 
 from .models import Membership, Organisation, Permission, Profile, Role
+from .serializers import OrgModelSerializer
 from .viewsets import OrgModelViewSet
 
 User = get_user_model()
@@ -266,6 +267,41 @@ class MembershipViewSet(OrgModelViewSet):
 
 LIST = MembershipViewSet.as_view({'get': 'list', 'post': 'create'})
 DETAIL = MembershipViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update'})
+
+
+class AllFieldsMembershipSerializer(OrgModelSerializer):
+    class Meta:
+        model = Membership
+        fields = '__all__'
+
+
+class OrgModelSerializerTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(phone='0712345678', password='pass12345')
+        self.organisation = Organisation.objects.create(name='Kilimani Court')
+        self.membership = Membership.objects.create(user=self.user, organisation=self.organisation)
+
+    def test_organisation_is_hidden_even_with_all_fields(self):
+        fields = AllFieldsMembershipSerializer().fields
+        self.assertNotIn('organisation', fields)
+        self.assertIn('id', fields)
+        self.assertIn('created_at', fields)
+
+    def test_organisation_is_not_in_the_response(self):
+        data = AllFieldsMembershipSerializer(self.membership).data
+        self.assertNotIn('organisation', data)
+
+    def test_organisation_sent_by_client_is_ignored(self):
+        other = Organisation.objects.create(name='Other Court')
+        other_user = User.objects.create_user(phone='0722222222', password='pass12345')
+        serializer = AllFieldsMembershipSerializer(data={'user': other_user.pk, 'organisation': other.pk})
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertNotIn('organisation', serializer.validated_data)
+
+    def test_created_at_and_updated_at_cannot_be_written(self):
+        serializer = AllFieldsMembershipSerializer()
+        self.assertTrue(serializer.fields['created_at'].read_only)
+        self.assertTrue(serializer.fields['updated_at'].read_only)
 
 
 class OrgViewSetTests(TestCase):
