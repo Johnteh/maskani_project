@@ -3,10 +3,17 @@ from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
 
 from common.phone import normalize_phone
+from common.serializers import BaseModelSerializer
 
 from .models import Membership, Organisation, phone_validator
 
 User = get_user_model()
+
+
+class OrgModelSerializer(BaseModelSerializer):
+    """Base for serializers of organisation-owned models. The organisation is set by the view, never by the client."""
+
+    internal_fields = ('organisation',)
 
 
 class PhoneField(serializers.CharField):
