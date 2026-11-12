@@ -100,6 +100,23 @@ class Organisation(BaseModel):
         return self.name
 
 
+class OrganisationOwnedModel(BaseModel):
+    """
+    Base for models whose rows belong to one organisation. The organisation is set by the view
+    from the user's membership (see OrgModelViewSet), never by the client, so it is not editable.
+    """
+
+    organisation = models.ForeignKey(
+        Organisation,
+        on_delete=models.PROTECT,
+        editable=False,
+        related_name='%(app_label)s_%(class)s_set',
+    )
+
+    class Meta:
+        abstract = True
+
+
 class Permission(BaseModel):
     code = models.CharField(max_length=100, unique=True)
     name = models.CharField(max_length=100)
