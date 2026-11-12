@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     # local apps
     'common',
     'identity',
+    'properties',
 ]
 
 AUTH_USER_MODEL = 'identity.User'
