@@ -5,13 +5,14 @@ from .permissions import HasPermissions, get_membership
 
 class OrgModelViewSet(BaseModelViewSet):
     """
-    A ModelViewSet whose data belongs to one organisation, chosen by the X-Organisation header.
-    Subclasses set `queryset`, `serializer_class` and `required_permissions`, e.g.
-    {'list': 'property.read', 'create': 'property.create'}; an action not listed is denied.
+    A ModelViewSet for data owned by the organisation named in the X-Organisation header.
+    Subclasses set `permission_resource` (e.g. 'property'); a custom @action sets `permission_code`.
+    See get_permission_code.
     """
 
     permission_classes = (HasPermissions,)
-    required_permissions = {}
+    permission_resource = None
+    permission_code = None
 
     @property
     def membership(self):
