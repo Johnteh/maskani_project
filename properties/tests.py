@@ -1,12 +1,16 @@
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from catalogue.models import ChargeType
 from identity.models import Membership, Organisation, Permission, Role
 
-from .models import Property
+from .models import Frequency, Property, PropertyCharge
 
 User = get_user_model()
 
@@ -201,3 +205,128 @@ class PropertyApiTests(TestCase):
         theirs = self.request('get', self.LIST_URL, self.user, self.karen).data
         self.assertEqual([row['name'] for row in mine], ['Kilimani Court'])
         self.assertEqual([row['name'] for row in theirs], ['Karen House'])
+
+
+class PropertyChargeModelTests(TestCase):
+    def setUp(self):
+        self.organisation = Organisation.objects.create(name='Kilimani Ltd')
+        self.property = Property.objects.create(
+            organisation=self.organisation, name='Kilimani Court', address='Argwings Kodhek Rd'
+        )
+        self.service = ChargeType.objects.create(code='SERVICE_CHARGE', name='Service charge')
+        self.garbage = ChargeType.objects.create(code='GARBAGE', name='Garbage collection')
+
+    def make(self, **kwargs):
+        defaults = {
+            'organisation': self.organisation,
+            'property': self.property,
+            'charge_type': self.service,
+            'amount': Decimal('1500.00'),
+        }
+        return PropertyCharge.objects.create(**{**defaults, **kwargs})
+
+    def test_str_uses_the_charge_type_name_when_there_is_no_label(self):
+        self.assertEqual(str(self.make()), 'Service charge (Kilimani Court)')
+
+    def test_str_uses_the_label_when_there_is_one(self):
+        self.assertEqual(str(self.make(name='Block A service')), 'Block A service (Kilimani Court)')
+
+    def test_label_is_optional(self):
+        charge = self.make()
+        charge.full_clean()
+        self.assertEqual(charge.name, '')
+
+    def test_active_by_default(self):
+        self.assertTrue(self.make().is_active)
+
+    def test_amount_keeps_cents_exactly(self):
+        charge = self.make(amount=Decimal('1500.50'))
+        charge.refresh_from_db()
+        self.assertEqual(charge.amount, Decimal('1500.50'))
+
+    def test_negative_amount_is_rejected_by_validation(self):
+        charge = PropertyCharge(
+            organisation=self.organisation, property=self.property, charge_type=self.service, amount=Decimal('-1')
+        )
+        with self.assertRaises(ValidationError) as caught:
+            charge.full_clean()
+        self.assertIn('amount', caught.exception.message_dict)
+
+    def test_organisation_is_required(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PropertyCharge.objects.create(property=self.property, charge_type=self.service, amount=Decimal('300'))
+
+    def test_charge_type_is_required(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PropertyCharge.objects.create(
+                organisation=self.organisation, property=self.property, amount=Decimal('300')
+            )
+
+    def test_a_charge_type_in_use_cannot_be_deleted(self):
+        self.make()
+        with self.assertRaises(ProtectedError):
+            self.service.delete()
+
+    def test_property_reaches_its_charges(self):
+        charge = self.make()
+        self.assertEqual(list(self.property.charges.all()), [charge])
+
+    def test_deleting_a_property_deletes_its_charges(self):
+        self.make()
+        self.property.delete()
+        self.assertEqual(PropertyCharge.objects.count(), 0)
+
+    def test_charges_are_ordered_by_charge_type_name(self):
+        self.make(charge_type=self.service)
+        self.make(charge_type=self.garbage)
+        self.assertEqual(
+            [c.charge_type.code for c in self.property.charges.all()], ['GARBAGE', 'SERVICE_CHARGE']
+        )
+
+    def test_two_active_charges_of_one_type_cannot_share_a_property(self):
+        self.make()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make(name='Block B service', amount=Decimal('2000'))
+
+    def test_different_types_can_share_a_property(self):
+        self.make(charge_type=self.service)
+        self.make(charge_type=self.garbage)
+        self.assertEqual(self.property.charges.count(), 2)
+
+    def test_a_retired_charge_type_can_be_added_again(self):
+        old = self.make()
+        old.is_active = False
+        old.save()
+        new = self.make(amount=Decimal('2000'))
+        self.assertTrue(new.is_active)
+
+    def test_the_same_type_is_fine_on_another_property(self):
+        other = Property.objects.create(organisation=self.organisation, name='Westlands Heights', address='x')
+        self.make()
+        self.make(property=other)
+        self.assertEqual(PropertyCharge.objects.filter(charge_type=self.service).count(), 2)
+
+    def test_frequency_is_monthly_by_default(self):
+        self.assertEqual(self.make().frequency, Frequency.MONTHLY)
+
+    def test_every_frequency_is_accepted(self):
+        for value in ('MONTHLY', 'QUARTERLY', 'HALF_YEARLY', 'ANNUALLY', 'ONE_OFF'):
+            charge = self.make(frequency=value, charge_type=ChargeType.objects.create(code=value, name=value))
+            charge.full_clean()
+
+    def test_an_unknown_frequency_is_rejected_by_validation(self):
+        charge = PropertyCharge(
+            organisation=self.organisation,
+            property=self.property,
+            charge_type=self.service,
+            amount=Decimal('100'),
+            frequency='FORTNIGHTLY',
+        )
+        with self.assertRaises(ValidationError) as caught:
+            charge.full_clean()
+        self.assertIn('frequency', caught.exception.message_dict)
+
+    def test_frequency_does_not_make_a_second_active_charge_of_one_type_allowed(self):
+        self.make(frequency=Frequency.MONTHLY)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make(frequency=Frequency.ANNUALLY)
