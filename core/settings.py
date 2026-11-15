@@ -46,6 +46,7 @@ INSTALLED_APPS = [
 
     # local apps
     'common',
+    'catalogue',
     'identity',
     'properties',
 ]

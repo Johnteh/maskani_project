@@ -96,9 +96,6 @@ class Organisation(BaseModel):
     class Meta:
         ordering = ('name',)
 
-    def __str__(self):
-        return self.name
-
 
 class OrganisationOwnedModel(BaseModel):
     """
@@ -135,9 +132,6 @@ class Role(BaseModel):
 
     class Meta:
         ordering = ('name',)
-
-    def __str__(self):
-        return self.name
 
 
 class Membership(BaseModel):

@@ -196,6 +196,19 @@ class AdminTests(TestCase):
         self.assertEqual(self.admin.get_short_name(), 'Amina')
 
 
+class ModelStrTests(SimpleTestCase):
+    def test_a_model_with_a_name_shows_it(self):
+        self.assertEqual(str(Organisation(name='Kilimani Ltd')), 'Kilimani Ltd')
+        self.assertEqual(str(Role(name='Caretaker')), 'Caretaker')
+
+    def test_a_blank_name_falls_back_to_the_model_and_pk(self):
+        self.assertEqual(str(Organisation(name='', pk=7)), 'Organisation 7')
+
+    def test_a_model_with_its_own_str_keeps_it(self):
+        self.assertEqual(str(User(phone='+254712345678')), '+254712345678')
+        self.assertEqual(str(Permission(code='property.read')), 'property.read')
+
+
 class MembershipPermissionTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user('0712345678', password='pass12345')
