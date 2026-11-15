@@ -1,12 +1,18 @@
+from types import SimpleNamespace
+
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import SimpleTestCase, TestCase
 from rest_framework import serializers
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.routers import SimpleRouter
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from common.phone import normalize_phone
 
 from .models import Membership, Organisation, Permission, Profile, Role
+from .permissions import get_permission_code
 from .serializers import OrgModelSerializer
 from .viewsets import OrgModelViewSet
 
@@ -258,15 +264,65 @@ class MembershipViewSet(OrgModelViewSet):
 
     queryset = Membership.objects.all()
     serializer_class = MembershipSerializer
-    required_permissions = {
-        'list': 'member.read',
-        'retrieve': 'member.read',
-        'create': 'member.add',
-    }
+    permission_resource = 'member'
+
+    @action(detail=True, methods=['post'], permission_code='member.deactivate')
+    def deactivate(self, request, pk=None):
+        membership = self.get_object()
+        membership.is_active = False
+        membership.save()
+        return Response(status=204)
+
+    @action(detail=True, methods=['post'])
+    def forgotten(self, request, pk=None):
+        """A custom action that names no permission_code."""
+        return Response(status=204)
+
+
+class NoResourceViewSet(MembershipViewSet):
+    permission_resource = None
 
 
 LIST = MembershipViewSet.as_view({'get': 'list', 'post': 'create'})
 DETAIL = MembershipViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update'})
+NO_RESOURCE_LIST = NoResourceViewSet.as_view({'get': 'list'})
+
+# The router is what applies an @action's keyword arguments (permission_code) to its view.
+_router = SimpleRouter()
+_router.register('memberships', MembershipViewSet, basename='membership')
+_routes = {route.name: route.callback for route in _router.urls}
+DEACTIVATE = _routes['membership-deactivate']
+FORGOTTEN = _routes['membership-forgotten']
+
+
+class PermissionCodeTests(SimpleTestCase):
+    def view(self, **attrs):
+        return SimpleNamespace(permission_resource='property', permission_code=None, **attrs)
+
+    def test_standard_actions_derive_their_code_from_the_resource(self):
+        view = self.view()
+        for action_name, code in [
+            ('list', 'property.read'),
+            ('retrieve', 'property.read'),
+            ('create', 'property.create'),
+            ('update', 'property.update'),
+            ('partial_update', 'property.update'),
+            ('destroy', 'property.delete'),
+        ]:
+            self.assertEqual(get_permission_code(view, action_name), code, action_name)
+
+    def test_a_custom_action_has_no_derived_code(self):
+        self.assertIsNone(get_permission_code(self.view(), 'retire'))
+
+    def test_a_custom_action_uses_the_code_it_names(self):
+        view = self.view()
+        view.permission_code = 'property.retire'
+        self.assertEqual(get_permission_code(view, 'retire'), 'property.retire')
+
+    def test_no_resource_means_no_code(self):
+        view = self.view()
+        view.permission_resource = None
+        self.assertIsNone(get_permission_code(view, 'list'))
 
 
 class AllFieldsMembershipSerializer(OrgModelSerializer):
@@ -308,8 +364,9 @@ class OrgViewSetTests(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
         self.read = Permission.objects.create(code='member.read', name='Read members')
-        self.add = Permission.objects.create(code='member.add', name='Add members')
-        self.edit = Permission.objects.create(code='member.edit', name='Edit members')
+        self.create_code = Permission.objects.create(code='member.create', name='Create members')
+        self.update_code = Permission.objects.create(code='member.update', name='Update members')
+        self.deactivate_code = Permission.objects.create(code='member.deactivate', name='Deactivate members')
         self.kilimani = Organisation.objects.create(name='Kilimani Court')
         self.karen = Organisation.objects.create(name='Karen House')
         self.user = User.objects.create_user('0712345678', password='pass12345')
@@ -362,7 +419,7 @@ class OrgViewSetTests(TestCase):
         self.assertEqual(self.call(LIST, 'get', self.user, self.kilimani).status_code, 403)
 
     def test_member_without_the_permission_is_403(self):
-        self.join(self.user, self.kilimani, self.add)
+        self.join(self.user, self.kilimani, self.create_code)
         self.assertEqual(self.call(LIST, 'get', self.user, self.kilimani).status_code, 403)
 
     def test_permissions_come_from_the_header_organisation(self):
@@ -371,10 +428,51 @@ class OrgViewSetTests(TestCase):
         self.assertEqual(self.call(LIST, 'get', self.user, self.kilimani).status_code, 200)
         self.assertEqual(self.call(LIST, 'get', self.user, self.karen).status_code, 403)
 
-    def test_action_not_listed_is_denied(self):
-        mine = self.join(self.user, self.kilimani, self.read, self.add, self.edit)
+    def test_standard_action_needs_the_code_derived_from_the_resource(self):
+        mine = self.join(self.user, self.kilimani, self.read)
         response = self.call(DETAIL, 'patch', self.user, self.kilimani, data={'is_active': False}, pk=mine.pk)
         self.assertEqual(response.status_code, 403)
+        self.join(self.other, self.kilimani, self.read, self.update_code)
+        theirs = Membership.objects.get(user=self.other)
+        response = self.call(DETAIL, 'patch', self.other, self.kilimani, data={'is_active': False}, pk=theirs.pk)
+        self.assertEqual(response.status_code, 200)
+
+    def test_view_without_a_resource_is_denied(self):
+        self.join(self.user, self.kilimani, self.read, self.create_code, self.update_code)
+        self.assertEqual(self.call(NO_RESOURCE_LIST, 'get', self.user, self.kilimani).status_code, 403)
+
+    def test_request_matching_no_action_is_denied(self):
+        self.join(self.user, self.kilimani, self.read)
+        self.assertEqual(self.call(LIST, 'options', self.user, self.kilimani).status_code, 403)
+
+    def test_custom_action_needs_the_code_it_names(self):
+        self.join(self.user, self.kilimani, self.deactivate_code)
+        target = self.join(self.other, self.kilimani)
+        response = self.call(DEACTIVATE, 'post', self.user, self.kilimani, pk=target.pk)
+        self.assertEqual(response.status_code, 204)
+        target.refresh_from_db()
+        self.assertFalse(target.is_active)
+
+    def test_standard_codes_do_not_open_a_custom_action(self):
+        self.join(self.user, self.kilimani, self.read, self.create_code, self.update_code)
+        target = self.join(self.other, self.kilimani)
+        response = self.call(DEACTIVATE, 'post', self.user, self.kilimani, pk=target.pk)
+        self.assertEqual(response.status_code, 403)
+        target.refresh_from_db()
+        self.assertTrue(target.is_active)
+
+    def test_custom_action_without_a_named_code_is_denied(self):
+        self.join(self.user, self.kilimani, self.read, self.create_code, self.update_code, self.deactivate_code)
+        target = self.join(self.other, self.kilimani)
+        self.assertEqual(self.call(FORGOTTEN, 'post', self.user, self.kilimani, pk=target.pk).status_code, 403)
+
+    def test_custom_action_is_scoped_to_the_organisation(self):
+        self.join(self.user, self.kilimani, self.deactivate_code)
+        theirs = self.join(self.other, self.karen)
+        response = self.call(DEACTIVATE, 'post', self.user, self.kilimani, pk=theirs.pk)
+        self.assertEqual(response.status_code, 404)
+        theirs.refresh_from_db()
+        self.assertTrue(theirs.is_active)
 
     def test_other_organisations_object_is_404(self):
         self.join(self.user, self.kilimani, self.read)
@@ -382,7 +480,7 @@ class OrgViewSetTests(TestCase):
         self.assertEqual(self.call(DETAIL, 'get', self.user, self.kilimani, pk=theirs.pk).status_code, 404)
 
     def test_create_is_placed_in_the_header_organisation(self):
-        self.join(self.user, self.kilimani, self.add)
+        self.join(self.user, self.kilimani, self.create_code)
         response = self.call(LIST, 'post', self.user, self.kilimani, data={'user': self.other.pk})
         self.assertEqual(response.status_code, 201)
         created = Membership.objects.get(user=self.other)
