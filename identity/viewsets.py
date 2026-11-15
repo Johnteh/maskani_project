@@ -11,7 +11,6 @@ class OrgModelViewSet(BaseModelViewSet):
     """
 
     permission_classes = (HasPermissions,)
-    organisation_field = 'organisation'
     required_permissions = {}
 
     @property
@@ -22,7 +21,7 @@ class OrgModelViewSet(BaseModelViewSet):
         queryset = super().get_queryset()
         if self.membership is None:
             return queryset.none()
-        return queryset.filter(**{self.organisation_field: self.membership.organisation})
+        return queryset.filter(organisation=self.membership.organisation)
 
     def perform_create(self, serializer):
-        serializer.save(**{self.organisation_field: self.membership.organisation})
+        serializer.save(organisation=self.membership.organisation)
