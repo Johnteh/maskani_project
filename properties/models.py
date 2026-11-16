@@ -14,6 +14,25 @@ class Property(OrganisationOwnedModel):
         ordering = ('name',)
 
 
+class Unit(OrganisationOwnedModel):
+    """A rentable space in a property, e.g. flat A4 or a ground floor shop (rent in KES per month)."""
+
+    property = models.ForeignKey(Property, on_delete=models.PROTECT, related_name='units')
+    unit_number = models.CharField(max_length=30)
+    unit_name = models.CharField(max_length=100, blank=True)
+    rent = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ('unit_number',)
+        constraints = [
+            models.UniqueConstraint(fields=['property', 'unit_number'], name='unique_unit_number_per_property'),
+        ]
+
+    def __str__(self):
+        return self.unit_number
+
+
 class Frequency(models.TextChoices):
     """How often a charge is billed. Billing code branches on these, so the list is fixed in code."""
 
