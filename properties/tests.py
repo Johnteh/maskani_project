@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 from catalogue.models import ChargeType
 from identity.models import Membership, Organisation, Permission, Role
 
-from .models import Frequency, Property, PropertyCharge
+from .models import Frequency, Property, PropertyCharge, Unit
 
 User = get_user_model()
 
@@ -330,3 +330,71 @@ class PropertyChargeModelTests(TestCase):
         self.make(frequency=Frequency.MONTHLY)
         with self.assertRaises(IntegrityError), transaction.atomic():
             self.make(frequency=Frequency.ANNUALLY)
+
+
+class UnitModelTests(TestCase):
+    def setUp(self):
+        self.organisation = Organisation.objects.create(name='Kilimani Ltd')
+        self.property = Property.objects.create(
+            organisation=self.organisation, name='Kilimani Court', address='Argwings Kodhek Rd'
+        )
+
+    def make(self, **kwargs):
+        defaults = {
+            'organisation': self.organisation,
+            'property': self.property,
+            'unit_number': 'A4',
+            'rent': Decimal('25000.00'),
+        }
+        return Unit.objects.create(**{**defaults, **kwargs})
+
+    def test_str_is_the_unit_number(self):
+        self.assertEqual(str(self.make(unit_name='Ground floor shop')), 'A4')
+
+    def test_unit_name_is_optional(self):
+        unit = self.make()
+        unit.full_clean()
+        self.assertEqual(unit.unit_name, '')
+
+    def test_active_by_default(self):
+        self.assertTrue(self.make().is_active)
+
+    def test_rent_keeps_cents_exactly(self):
+        unit = self.make(rent=Decimal('25000.50'))
+        unit.refresh_from_db()
+        self.assertEqual(unit.rent, Decimal('25000.50'))
+
+    def test_negative_rent_is_rejected_by_validation(self):
+        unit = Unit(organisation=self.organisation, property=self.property, unit_number='B1', rent=Decimal('-1'))
+        with self.assertRaises(ValidationError) as caught:
+            unit.full_clean()
+        self.assertIn('rent', caught.exception.message_dict)
+
+    def test_organisation_is_required(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Unit.objects.create(property=self.property, unit_number='A4', rent=Decimal('1000'))
+
+    def test_property_reaches_its_units(self):
+        unit = self.make()
+        self.assertEqual(list(self.property.units.all()), [unit])
+
+    def test_a_property_with_units_cannot_be_deleted(self):
+        self.make()
+        with self.assertRaises(ProtectedError):
+            self.property.delete()
+
+    def test_unit_number_must_be_unique_within_a_property(self):
+        self.make()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.make(unit_name='Duplicate')
+
+    def test_the_same_unit_number_is_fine_in_another_property(self):
+        other = Property.objects.create(organisation=self.organisation, name='Westlands Heights', address='x')
+        self.make()
+        self.make(property=other)
+        self.assertEqual(Unit.objects.filter(unit_number='A4').count(), 2)
+
+    def test_units_are_ordered_by_unit_number(self):
+        self.make(unit_number='B2')
+        self.make(unit_number='A1')
+        self.assertEqual([u.unit_number for u in self.property.units.all()], ['A1', 'B2'])
